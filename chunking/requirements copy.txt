@@ -1,0 +1,9 @@
+# Core dependencies for Tree-sitter Code Chunker
+tree-sitter==0.20.4
+tree-sitter-languages>=1.10.0
+
+# Optional: For faster JSON processing
+orjson>=3.10.0
+
+# Optional: For progress bars
+tqdm>=4.66.0
