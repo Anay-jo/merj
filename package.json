@@ -1,0 +1,37 @@
+{
+  "name": "Merj",
+  "version": "1.0.0",
+  "description": "Creating a CLI that handles merge conflicts automatically on git pulls",
+  "main": "bin/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "commander": "^11.1.0",
+    "@octokit/rest": "^20.0.2",
+    "dotenv": "^16.3.1",
+    "inquirer": "^8.2.6",
+    "simple-git": "^3.20.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Anay-jo/MergeConflictResolver.git"
+  },
+  "bin": {  
+    "merj": "./bin/index.js"  
+  },
+
+  "keywords": [
+    "git",
+    "CLI",
+    "LLM",
+    "Agentic",
+    "AI"
+  ],
+  "author": "Anay Sam Ayush and Josh",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Anay-jo/MergeConflictResolver/issues"
+  },
+  "homepage": "https://github.com/Anay-jo/MergeConflictResolver#readme"
+}
