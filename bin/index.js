@@ -36,20 +36,20 @@ program
     const answers = await inquirer.prompt(questions);
     
     if (storeToken(answers.token)) {
-      console.log('✅ Token stored successfully');
+      console.log(' Token stored successfully');
       
       // Test the authentication
       console.log('Testing authentication...');
       const result = await testAuthentication();
       
       if (result.authenticated) {
-        console.log(`✅ Successfully authenticated as ${result.username}`);
+        console.log(` Successfully authenticated as ${result.username}`);
       } else {
-        console.log(`❌ Authentication failed: ${result.error}`);
+        console.log(` Authentication failed: ${result.error}`);
         console.log('Please check your token and try again.');
       }
     } else {
-      console.log('❌ Failed to store token');
+      console.log(' Failed to store token');
     }
   });
 
@@ -64,17 +64,17 @@ program
       const authResult = await testAuthentication();
       
       if (!authResult.authenticated) {
-        console.log('❌ Not authenticated. Please run: merj auth');
+        console.log(' Not authenticated. Please run: merj auth');
         console.log('   You need a GitHub Personal Access Token to use this feature.');
         process.exit(1);
       }
       
-      console.log(`✅ Authenticated as ${authResult.username}`);
+      console.log(` Authenticated as ${authResult.username}`);
       
       // Get repository info
       const repoInfo = await getRepoInfo();
-      console.log(`📁 Repository: ${repoInfo.owner}/${repoInfo.repo}`);
-      console.log(`🌿 Current branch: ${repoInfo.currentBranch}`);
+      console.log(` Repository: ${repoInfo.owner}/${repoInfo.repo}`);
+      console.log(` Current branch: ${repoInfo.currentBranch}`);
       
       // Get authenticated GitHub client
       const octokit = getAuthenticatedClient();
@@ -82,7 +82,7 @@ program
       // Check for existing conflicts first
       const existingConflicts = await checkMergeConflicts();
       if (existingConflicts.hasConflicts) {
-        console.log('\n⚠️  MERGE CONFLICTS ALREADY EXIST!');
+        console.log('\n  MERGE CONFLICTS ALREADY EXIST!');
         console.log(`Found ${existingConflicts.conflictedFiles.length} conflicted file(s):\n`);
         
         existingConflicts.conflictedFiles.forEach((file, index) => {
@@ -98,12 +98,12 @@ program
       const pullResult = await pullFromRemote(options.remote, options.branch);
       
       if (pullResult.success) {
-        console.log('✅ Pull completed successfully');
+        console.log('Pull completed successfully');
         if (pullResult.summary) {
           console.log(pullResult.summary);
         }
       } else if (pullResult.hasConflicts) {
-        console.log('\n⚠️  MERGE CONFLICTS DETECTED!');
+        console.log('\n  MERGE CONFLICTS DETECTED!');
         console.log(`Found ${pullResult.conflictedFiles.length} conflicted file(s):\n`);
         
         pullResult.conflictedFiles.forEach((file, index) => {
@@ -115,7 +115,7 @@ program
       }
       
     } catch (error) {
-      console.error('❌ Error:', error.message);
+      console.error('Error:', error.message);
       process.exit(1);
     }
   });
@@ -132,17 +132,17 @@ program
       const authResult = await testAuthentication();
       
       if (!authResult.authenticated) {
-        console.log('❌ Not authenticated. Please run: merj auth');
+        console.log('Not authenticated. Please run: merj auth');
         console.log('   You need a GitHub Personal Access Token to use this feature.');
         process.exit(1);
       }
       
-      console.log(`✅ Authenticated as ${authResult.username}`);
+      console.log(`Authenticated as ${authResult.username}`);
       
       // Get repository info
       const repoInfo = await getRepoInfo();
-      console.log(`📁 Repository: ${repoInfo.owner}/${repoInfo.repo}`);
-      console.log(`🌿 Current branch: ${repoInfo.currentBranch}`);
+      console.log(`Repository: ${repoInfo.owner}/${repoInfo.repo}`);
+      console.log(`Current branch: ${repoInfo.currentBranch}`);
       
       // Get authenticated GitHub client
       const octokit = getAuthenticatedClient();
@@ -151,11 +151,11 @@ program
       const pushResult = await pushToRemote(options.remote, options.branch, options.force);
       
       if (pushResult.success) {
-        console.log(`✅ ${pushResult.message}`);
+        console.log(`${pushResult.message}`);
       }
       
     } catch (error) {
-      console.error('❌ Error:', error.message);
+      console.error('Error:', error.message);
       process.exit(1);
     }
   });
