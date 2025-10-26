@@ -4,6 +4,8 @@ treesitter_chunker_simple.py - Simplified version using tree-sitter-languages.
 
 This version uses the pre-built parsers from tree-sitter-languages package,
 eliminating the need to build grammars manually.
+
+*** MODIFIED to include the 'signature' field in CodeChunk ***
 """
 
 import json
@@ -27,11 +29,13 @@ except ImportError:
     HAS_TQDM = False
 
 
+# --- CHANGE 1: Added 'signature: str' ---
 @dataclass
 class CodeChunk:
     """Represents a single code chunk with metadata."""
     file_path: str
     language: str
+    signature: str  # <-- ADDED
     content: str
     chunk_type: str
     start_line: int
@@ -252,9 +256,14 @@ class Chunker:
                     if between_chunk_lines:
                         chunk_content = '\n'.join(between_chunk_lines)
                         if chunk_content.strip():
+                            
+                            # --- CHANGE 2: Added signature for 'imports_and_globals' ---
+                            chunk_signature = f"imports_and_globals:{between_chunk_start + 1}"
+                            
                             chunks.append(CodeChunk(
                                 file_path=str(file_path),
                                 language=lang_name,
+                                signature=chunk_signature,  # <-- ADDED
                                 content=chunk_content,
                                 chunk_type="imports_and_globals",
                                 start_line=between_chunk_start + 1,
@@ -269,11 +278,15 @@ class Chunker:
                     chunk_lines = content_lines[start_line:end_line + 1]
                     chunk_content = '\n'.join(chunk_lines)
 
+                    # --- CHANGE 3: Added signature for 'top_level_nodes' ---
+                    chunk_signature = chunk_lines[0].strip() if chunk_lines else ""
+
                     if chunk_content.strip():
                         chunk_type = self._determine_chunk_type(child.type)
                         chunks.append(CodeChunk(
                             file_path=str(file_path),
                             language=lang_name,
+                            signature=chunk_signature,  # <-- ADDED
                             content=chunk_content,
                             chunk_type=chunk_type,
                             start_line=start_line + 1,
@@ -293,9 +306,14 @@ class Chunker:
             if between_chunk_lines:
                 chunk_content = '\n'.join(between_chunk_lines)
                 if chunk_content.strip():
+                    
+                    # --- CHANGE 4: Added signature for final 'imports_and_globals' ---
+                    chunk_signature = f"imports_and_globals:{between_chunk_start + 1}"
+                    
                     chunks.append(CodeChunk(
                         file_path=str(file_path),
                         language=lang_name,
+                        signature=chunk_signature,  # <-- ADDED
                         content=chunk_content,
                         chunk_type="imports_and_globals",
                         start_line=between_chunk_start + 1,
