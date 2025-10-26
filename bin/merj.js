@@ -71,19 +71,6 @@ async function pull(argv) {
     rvb_diff.push({filefrom: diff.from, fileto: diff.to, lns: changes})
   });
 
-  lvr_diff = []
-
-  parseddiffLocalVsRemote.forEach((diff) => {
-    //for each chunk/function
-    changes = []
-    diff.chunks.forEach((d) => {
-        d.changes.forEach((change) => {
-            changes.push(change.ln)
-        });
-    });
-    lvr_diff.push({filefrom: diff.from, fileto: diff.to, lns: changes})
-  });
-
   const jumbo_json = {
     lbd: lvb_diff,
     rbd: rvb_diff
