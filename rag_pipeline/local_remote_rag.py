@@ -168,7 +168,9 @@ def process_git_diff_json(
     distance_threshold: float = 0.5,
     db_path: str = "./my_chroma_db",
     api_key: Optional[str] = None,
-    verbose: bool = True
+    verbose: bool = True,
+    save_to_file: bool = False,
+    output_dir: str = "./rag_output"
 ) -> Dict[str, Any]:
     """
     Process git diff JSON with local and remote changes.
@@ -181,6 +183,8 @@ def process_git_diff_json(
         db_path: Path to ChromaDB
         api_key: Voyage AI API key (or use env var)
         verbose: Print progress information
+        save_to_file: Whether to save output to files
+        output_dir: Directory to save output files
 
     Returns:
         Dict with local_analysis, remote_analysis, and combined RAG results
@@ -268,6 +272,21 @@ def process_git_diff_json(
     if verbose:
         print(f"\n✓ Processing complete!")
 
+    # Save to files if requested
+    if save_to_file:
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Save JSON format
+        json_path = os.path.join(output_dir, "rag_chunks.json")
+        save_chunks_to_file(output, json_path)
+
+        # Save LLM-ready format
+        txt_path = os.path.join(output_dir, "llm_context.txt")
+        save_llm_context_to_file(output, txt_path)
+
+        if verbose:
+            print(f"\n📁 Files saved to {output_dir}/")
+
     return output
 
 
@@ -312,6 +331,112 @@ def compile_context_for_llm(rag_results: List[Dict], max_context_length: Optiona
         context_str = context_str[:max_context_length] + "\n... [truncated]"
 
     return context_str
+
+
+def save_chunks_to_file(output: Dict[str, Any], filepath: str = "rag_chunks_output.json") -> None:
+    """
+    Save RAG results to a file for LLM consumption.
+
+    Args:
+        output: The output from process_git_diff_json
+        filepath: Where to save the file
+    """
+    import json
+    from datetime import datetime
+
+    # Add timestamp
+    output_with_timestamp = output.copy()
+    output_with_timestamp['timestamp'] = datetime.now().isoformat()
+
+    # Save as JSON with custom serialization for non-JSON types
+    with open(filepath, 'w') as f:
+        json.dump(output_with_timestamp, f, indent=2, default=str)
+
+    print(f"✓ Saved chunks to {filepath}")
+
+
+def save_llm_context_to_file(output: Dict[str, Any], filepath: str = "llm_context.txt") -> None:
+    """
+    Save formatted context for direct LLM consumption.
+
+    Creates a human-readable text file with:
+    - Local changes
+    - Remote changes
+    - Similar code patterns
+    """
+    with open(filepath, 'w') as f:
+        f.write("=" * 60 + "\n")
+        f.write("MERGE CONFLICT CONTEXT FOR LLM\n")
+        f.write("=" * 60 + "\n\n")
+
+        # Local chunks
+        f.write("LOCAL CHANGES (Your Branch):\n")
+        f.write("-" * 40 + "\n")
+        local_chunks = output.get('local_chunks', [])
+        if local_chunks:
+            for i, chunk in enumerate(local_chunks, 1):
+                # Handle both dict and object formats
+                if isinstance(chunk, dict):
+                    f.write(f"\n[{i}] File: {chunk.get('file_path', 'unknown')}\n")
+                    f.write(f"    Lines: {chunk.get('start_line', '?')}-{chunk.get('end_line', '?')}\n")
+                    f.write(f"    Type: {chunk.get('object_type', chunk.get('chunk_type', 'unknown'))}\n")
+                    f.write(f"    Code:\n")
+                    content = chunk.get('content', '').strip()
+                    for line in content.split('\n'):
+                        f.write(f"    {line}\n")
+                else:
+                    # Handle CodeChunk objects
+                    f.write(f"\n[{i}] File: {getattr(chunk, 'file_path', 'unknown')}\n")
+                    f.write(f"    Lines: {getattr(chunk, 'start_line', '?')}-{getattr(chunk, 'end_line', '?')}\n")
+                    f.write(f"    Type: {getattr(chunk, 'object_type', 'unknown')}\n")
+                    f.write(f"    Code:\n")
+                    content = getattr(chunk, 'content', '').strip()
+                    for line in content.split('\n'):
+                        f.write(f"    {line}\n")
+                f.write("\n")
+        else:
+            f.write("  (No local changes with conflicts)\n")
+
+        # Remote chunks
+        f.write("\n\nREMOTE CHANGES (Main Branch):\n")
+        f.write("-" * 40 + "\n")
+        remote_chunks = output.get('remote_chunks', [])
+        if remote_chunks:
+            for i, chunk in enumerate(remote_chunks, 1):
+                # Handle both dict and object formats
+                if isinstance(chunk, dict):
+                    f.write(f"\n[{i}] File: {chunk.get('file_path', 'unknown')}\n")
+                    f.write(f"    Lines: {chunk.get('start_line', '?')}-{chunk.get('end_line', '?')}\n")
+                    f.write(f"    Type: {chunk.get('object_type', chunk.get('chunk_type', 'unknown'))}\n")
+                    f.write(f"    Code:\n")
+                    content = chunk.get('content', '').strip()
+                    for line in content.split('\n'):
+                        f.write(f"    {line}\n")
+                else:
+                    # Handle CodeChunk objects
+                    f.write(f"\n[{i}] File: {getattr(chunk, 'file_path', 'unknown')}\n")
+                    f.write(f"    Lines: {getattr(chunk, 'start_line', '?')}-{getattr(chunk, 'end_line', '?')}\n")
+                    f.write(f"    Type: {getattr(chunk, 'object_type', 'unknown')}\n")
+                    f.write(f"    Code:\n")
+                    content = getattr(chunk, 'content', '').strip()
+                    for line in content.split('\n'):
+                        f.write(f"    {line}\n")
+                f.write("\n")
+        else:
+            f.write("  (No remote changes with conflicts)\n")
+
+        # RAG context with similar code
+        f.write("\n\nSIMILAR CODE PATTERNS FOUND:\n")
+        f.write("-" * 40 + "\n")
+        rag_results = output.get('rag_results', [])
+        if rag_results:
+            # Use existing compile_context_for_llm function
+            context = compile_context_for_llm(rag_results)
+            f.write(context)
+        else:
+            f.write("  (No similar code patterns found)\n")
+
+    print(f"✓ Saved LLM context to {filepath}")
 
 
 def main():

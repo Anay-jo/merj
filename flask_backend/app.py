@@ -257,7 +257,9 @@ def receive_diff_data():
                 k=data.get('k', 5),  # Allow client to specify k
                 distance_threshold=data.get('threshold', 0.5),
                 db_path='./rag_pipeline/demo_chroma_db',
-                verbose=False  # Don't print to console in API
+                verbose=False,  # Don't print to console in API
+                save_to_file=True,  # Save RAG context for LLM
+                output_dir='../rag_output'  # Output directory for files (relative to flask_backend)
             )
 
             # Return enhanced results

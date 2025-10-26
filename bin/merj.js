@@ -2,6 +2,7 @@
 /* eslint-disable no-console */
 const { spawnSync } = require('child_process');
 const fs = require('fs');
+const path = require('path');
 
 function run(cmd, args, opts = {}) {
   const res = spawnSync(cmd, args, { stdio: 'pipe', encoding: 'utf-8', ...opts });
@@ -37,6 +38,24 @@ async function getDiffs() {
 }
 
 async function pull(argv) {
+
+  const args = ['pull', ...argv.slice(3)]; // pass-through flags
+  console.log('➡️  git', args.join(' '));
+  const r = run('git', args, { stdio: 'inherit' });
+
+  if (r.status === 0) {
+    console.log('✅ Pull completed with no conflicts.');
+    process.exit(0);
+  }
+
+  // non-zero: could be conflicts or other error; check explicitly
+  if (!hasConflicts()) {
+    console.error('❌ Pull failed (no merge conflicts detected). Check the git error above.');
+    process.exit(1);
+  }
+
+  console.log('⚠️  Merge conflicts detected — running CodeRabbit side reviews…');
+
 
   const {
   mergeBase,
@@ -76,6 +95,7 @@ async function pull(argv) {
     rbd: rvb_diff
   }
 
+  console.log('📡 Sending diff data to RAG pipeline...');
   try {
     const response = await fetch('http://127.0.0.1:5000/api/data', {
       method: 'POST',
@@ -83,27 +103,19 @@ async function pull(argv) {
       body: JSON.stringify(jumbo_json)
     });
     const data = await response.json(); // get JSON data
+
+    if (response.ok && data.status === 'success') {
+      console.log('✅ RAG processing completed successfully');
+      console.log(`   - Found ${data.similar_code_found || 0} similar code patterns`);
+      console.log(`   - Saved context to rag_output/llm_context.txt`);
+    } else {
+      console.log('⚠️  RAG processing returned with warning:', data.warning || 'Unknown issue');
+    }
   } catch (error) {
-    console.error("Error:", error);
+    console.error("❌ Error connecting to RAG pipeline:", error.message);
+    console.log("⚠️  Continuing without RAG context...");
   }
 
-
-  const args = ['pull', ...argv.slice(3)]; // pass-through flags
-  console.log('➡️  git', args.join(' '));
-  const r = run('git', args, { stdio: 'inherit' });
-
-  if (r.status === 0) {
-    console.log('✅ Pull completed with no conflicts.');
-    process.exit(0);
-  }
-
-  // non-zero: could be conflicts or other error; check explicitly
-  if (!hasConflicts()) {
-    console.error('❌ Pull failed (no merge conflicts detected). Check the git error above.');
-    process.exit(1);
-  }
-
-  console.log('⚠️  Merge conflicts detected — running CodeRabbit side reviews…');
 
   // allow MAIN_REF override via env or a flag like --main=origin/dev
   const mainFlag = process.argv.find(a => a.startsWith('--main='));
@@ -127,6 +139,28 @@ async function pull(argv) {
 
   try { mainReview = JSON.parse(fs.readFileSync(mainJsonPath, 'utf-8')); } catch {}
   try { localReview = JSON.parse(fs.readFileSync(localJsonPath, 'utf-8')); } catch {}
+
+  // Save CodeRabbit findings for Claude to use
+  const codeRabbitOutput = {
+    mainBranchReview: mainReview,
+    localBranchReview: localReview,
+    timestamp: new Date().toISOString()
+  };
+
+  // Ensure rag_output directory exists
+  const ragOutputDir = path.join(process.cwd(), 'rag_output');
+  if (!fs.existsSync(ragOutputDir)) {
+    fs.mkdirSync(ragOutputDir, { recursive: true });
+  }
+
+  // Save CodeRabbit findings to file
+  const codeRabbitPath = path.join(ragOutputDir, 'coderabbit_review.json');
+  try {
+    fs.writeFileSync(codeRabbitPath, JSON.stringify(codeRabbitOutput, null, 2), 'utf-8');
+    console.log('📝 Saved CodeRabbit findings to rag_output/coderabbit_review.json');
+  } catch (e) {
+    console.error('⚠️  Failed to save CodeRabbit findings:', e.message);
+  }
 
   // Render a compact summary from CodeRabbit output (be defensive about shape)
   function summarize(label, data) {

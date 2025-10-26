@@ -1,0 +1,12 @@
+{
+  "local_chunks": [],
+  "remote_chunks": [],
+  "total_chunks": 0,
+  "rag_results": [],
+  "metadata": {
+    "collection": "test_conflicts",
+    "k": 5,
+    "threshold": 0.7
+  },
+  "timestamp": "2025-10-26T05:01:06.528171"
+}
