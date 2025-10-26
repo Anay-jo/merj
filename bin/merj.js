@@ -14,6 +14,20 @@ function hasConflicts() {
   return r.status === 0 && r.stdout.trim().length > 0;
 }
 
+function listConflictedFiles() {
+  const r = run('git', ['ls-files', '-u']);
+  if (r.status !== 0 || !r.stdout.trim()) return [];
+
+  const lines = r.stdout.trim().split('\n');
+  const files = new Set();
+  for (const ln of lines) {
+    const parts = ln.trim().split(/\s+/);
+    const file = parts[3];
+    if (file) files.add(file);
+  }
+  return [...files];
+}
+
 //This function gives us the diff information source: ChatGPT
 async function getDiffs() {
   const mergeBase = (await git.raw(['merge-base', 'HEAD', 'origin/main'])).trim();
@@ -190,11 +204,71 @@ async function pull(argv) {
   summarize('main since BASE',  mainReview);
   summarize('local since BASE', localReview);
 
-  console.log('\n👉 Next: run your merge assistant to resolve conflicts, using the hints above.\n' +
-              '   When done, stage changes and `git merge --continue` (or `git rebase --continue`).');
+  // Now attempt AI-powered resolution for each conflicted file
+  console.log('\n🤖 Starting AI-powered conflict resolution...\n');
 
-  // Keep non-zero exit so shell/CI knows merge not finished yet.
-  process.exit(2);
+  const conflictedFiles = listConflictedFiles();
+  if (conflictedFiles.length === 0) {
+    console.log('✅ No conflicted files found. Merge appears complete.');
+    process.exit(0);
+  }
+
+  console.log(`📋 Found ${conflictedFiles.length} conflicted file(s):`);
+  conflictedFiles.forEach((f, i) => console.log(`   ${i + 1}. ${f}`));
+  console.log('');
+
+  let resolvedCount = 0;
+  let rejectedCount = 0;
+  let failedCount = 0;
+
+  for (let i = 0; i < conflictedFiles.length; i++) {
+    const file = conflictedFiles[i];
+    console.log(`\n${'='.repeat(70)}`);
+    console.log(`📄 Processing file ${i + 1}/${conflictedFiles.length}: ${file}`);
+    console.log('='.repeat(70));
+
+    const resolveCmd = run('node', [
+      path.join(__dirname, 'resolve_with_prompt.js'),
+      '--file',
+      file
+    ], { stdio: 'inherit' });
+
+    if (resolveCmd.status === 0) {
+      resolvedCount++;
+      console.log(`✅ File ${i + 1}/${conflictedFiles.length} resolved successfully\n`);
+    } else if (resolveCmd.status === 1) {
+      rejectedCount++;
+      console.log(`⚠️  File ${i + 1}/${conflictedFiles.length} resolution rejected by user\n`);
+    } else {
+      failedCount++;
+      console.log(`❌ File ${i + 1}/${conflictedFiles.length} resolution failed\n`);
+    }
+  }
+
+  // Summary
+  console.log('\n' + '='.repeat(70));
+  console.log('📊 RESOLUTION SUMMARY');
+  console.log('='.repeat(70));
+  console.log(`✅ Resolved and applied: ${resolvedCount}`);
+  console.log(`⚠️  Rejected by user: ${rejectedCount}`);
+  console.log(`❌ Failed: ${failedCount}`);
+  console.log(`📋 Total conflicts: ${conflictedFiles.length}\n`);
+
+  if (resolvedCount === conflictedFiles.length) {
+    console.log('🎉 All conflicts resolved! Complete the merge:');
+    console.log('   git merge --continue');
+    console.log('   (or git rebase --continue if rebasing)\n');
+    process.exit(0);
+  } else if (resolvedCount > 0) {
+    console.log('⚠️  Some conflicts remain. Review and resolve manually:');
+    console.log('   - Check files that were rejected or failed');
+    console.log('   - When ready: git merge --continue\n');
+    process.exit(2);
+  } else {
+    console.log('❌ No conflicts were automatically resolved.');
+    console.log('👉 Resolve manually, then: git merge --continue\n');
+    process.exit(2);
+  }
 }
 
 function usage() {
