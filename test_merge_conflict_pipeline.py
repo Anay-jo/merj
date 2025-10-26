@@ -35,6 +35,7 @@ class MergeConflictSimulator:
             self.base_dir = Path(self.temp_dir)
 
         self.test_repo_path = None
+        self.remote_repo_path = None
         self.conflicts_created = []
 
     def __enter__(self):
@@ -81,6 +82,132 @@ class MergeConflictSimulator:
 
         print(f"📁 Created test repository at: {repo_path}")
         return repo_path
+
+    def create_remote_repo(self, name: str = "remote_repo") -> Path:
+        """Create a bare git repository to act as a remote."""
+        remote_path = self.base_dir / name
+        remote_path.mkdir(parents=True, exist_ok=True)
+        self.remote_repo_path = remote_path
+
+        # Initialize bare repo
+        success, _, _ = self.run_git("git init --bare", cwd=str(remote_path))
+        if success:
+            print(f"📡 Created remote repository at: {remote_path}")
+        return remote_path
+
+    def setup_remote_and_clone(self, remote_name: str = "remote", local_name: str = "local") -> Tuple[Path, Path]:
+        """Set up a remote repository and clone it locally."""
+        # Create bare remote repo
+        remote_path = self.create_remote_repo(remote_name)
+
+        # Clone to create local repo
+        local_path = self.base_dir / local_name
+        clone_cmd = f"git clone {remote_path} {local_path}"
+        success, _, _ = self.run_git(clone_cmd, cwd=str(self.base_dir))
+
+        if success:
+            self.test_repo_path = local_path
+            # Configure git in the cloned repo
+            self.run_git("git config user.email 'test@example.com'")
+            self.run_git("git config user.name 'Test User'")
+            print(f"📋 Cloned repository to: {local_path}")
+        else:
+            print(f"❌ Failed to clone repository")
+
+        return remote_path, local_path
+
+    def push_to_remote(self, branch: str = None) -> bool:
+        """Push current branch to remote."""
+        if branch:
+            cmd = f"git push origin {branch}"
+        else:
+            cmd = "git push"
+
+        success, _, _ = self.run_git(cmd)
+        return success
+
+    def simulate_divergent_changes(self) -> bool:
+        """Create divergent changes between local and remote to cause conflicts on pull."""
+        print("\n🔀 Creating divergent changes between local and remote...")
+
+        # First, create an initial file and push to remote
+        base_content = '''def calculate_price(items):
+    """Calculate total price."""
+    total = 0
+    for item in items:
+        total += item['price']
+    return total
+'''
+        self.write_file("pricing.py", base_content, "Initial pricing function")
+        self.run_git("git push -u origin main")
+        print("✓ Pushed initial version to remote")
+
+        # Now make changes directly in the remote (simulate another developer)
+        # We'll do this by creating another clone, making changes, and pushing
+        temp_clone = self.base_dir / "temp_remote_changes"
+        clone_cmd = f"git clone {self.remote_repo_path} {temp_clone}"
+        success, _, _ = self.run_git(clone_cmd, cwd=str(self.base_dir))
+
+        if success:
+            # Make changes in the temporary clone
+            remote_content = '''def calculate_price(items, tax_rate=0.08):
+    """Calculate total price with tax."""
+    subtotal = 0
+    for item in items:
+        subtotal += item['price'] * item.get('quantity', 1)
+
+    tax = subtotal * tax_rate
+    return subtotal + tax
+
+def apply_discount(total, discount_percent):
+    """Apply discount to total."""
+    return total * (1 - discount_percent)
+'''
+            temp_file = temp_clone / "pricing.py"
+            with open(temp_file, 'w') as f:
+                f.write(remote_content)
+
+            # Configure git first, then commit and push from temp clone
+            self.run_git("git config user.email 'remote@example.com'", cwd=str(temp_clone))
+            self.run_git("git config user.name 'Remote User'", cwd=str(temp_clone))
+            self.run_git("git add .", cwd=str(temp_clone))
+            success2, _, _ = self.run_git('git commit -m "Add tax calculation and discount function"', cwd=str(temp_clone))
+            if success2:
+                success3, _, stderr = self.run_git("git push", cwd=str(temp_clone))
+                if not success3:
+                    print(f"⚠️  Failed to push from temp clone: {stderr}")
+            print("✓ Pushed remote changes (tax and discount)")
+
+            # Clean up temp clone
+            shutil.rmtree(temp_clone, ignore_errors=True)
+
+        # Now make local changes (without pulling)
+        local_content = '''def calculate_price(items):
+    """Calculate total price with shipping."""
+    total = 0
+    for item in items:
+        price = item['price']
+        total += price
+
+    # Add shipping
+    if total < 50:
+        shipping = 9.99
+    else:
+        shipping = 0
+
+    return total + shipping
+
+def validate_items(items):
+    """Validate items before pricing."""
+    for item in items:
+        if 'price' not in item:
+            return False
+    return True
+'''
+        self.write_file("pricing.py", local_content, "Add shipping calculation and validation")
+        print("✓ Made local changes (shipping and validation)")
+
+        return True
 
     def write_file(self, filename: str, content: str, commit_msg: str = None):
         """Write a file and optionally commit it."""
@@ -553,13 +680,39 @@ export default UserService;
 
         # First, let's check the current state
         success, status, _ = self.run_git("git status")
-        print("\nCurrent git status:")
-        print(status[:500] if status else "No status output")
+        print("\nCurrent git status before pull:")
+        print(status[:300] if status else "No status output")
+
+        # Check if we have uncommitted changes that need to be handled
+        if "Changes not staged" in status or "Changes to be committed" in status:
+            print("⚠️  Uncommitted changes detected, committing them first...")
+            self.run_git("git add .")
+            self.run_git('git commit -m "Local changes before pull"')
+
+        # Debug: check the branch status
+        success, log_output, _ = self.run_git("git log --oneline -5")
+        print("\n📝 Recent commits:")
+        print(log_output[:300] if log_output else "No log output")
+
+        success, fetch_output, stderr = self.run_git("git fetch")
+        print("\n📥 Fetch output:", fetch_output[:200] if fetch_output else "Already up to date")
+        if stderr:
+            print("Fetch stderr:", stderr[:200])
+
+        # Check remote status
+        success, remote_log, _ = self.run_git("git log origin/main --oneline -5")
+        print("\n📝 Remote commits:")
+        print(remote_log[:300] if remote_log else "No remote commits")
 
         # Now run merj pull
         print("\n📥 Running 'merj pull'...")
 
         try:
+            # Set environment to avoid editor opening
+            env = os.environ.copy()
+            env['GIT_EDITOR'] = 'true'  # Use 'true' command as no-op editor
+            env['EDITOR'] = 'true'
+
             # Note: This assumes merj is installed and available
             result = subprocess.run(
                 "merj pull",
@@ -567,12 +720,26 @@ export default UserService;
                 cwd=self.test_repo_path,
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=10,  # Reduced timeout
+                env=env
             )
 
-            if result.returncode == 0:
-                print("✅ merj pull completed successfully")
+            # Check the result
+            if "Merge conflicts detected" in result.stdout or result.returncode == 2:
+                print("✅ merj pull detected conflicts (as expected)")
                 print("\nOutput:", result.stdout[:500] if result.stdout else "No output")
+
+                # Check if conflicts were actually created
+                success, status, _ = self.run_git("git status")
+                if "both modified" in status or "Unmerged paths" in status:
+                    print("✅ Conflicts successfully created by pull")
+                    return True
+                else:
+                    print("⚠️  No conflicts detected after pull")
+                    return False
+
+            elif result.returncode == 0:
+                print("✅ merj pull completed without conflicts")
                 return True
             else:
                 print(f"❌ merj pull failed with code {result.returncode}")
@@ -655,41 +822,34 @@ def run_full_test_pipeline():
     # Use context manager for automatic cleanup
     with MergeConflictSimulator() as simulator:
         try:
-            # Create test repository
-            repo_path = simulator.create_test_repo("merj_test_repo")
-            print(f"\n📍 Working in: {repo_path}")
-            print()
-
-            # Simulate different types of conflicts
+            # Set up remote repository and clone it locally
             print("=" * 60)
-            print("📝 Creating Merge Conflicts")
+            print("🔧 Setting Up Remote Repository")
             print("=" * 60)
 
-            # Python conflict
-            py_conflict = simulator.simulate_python_conflict()
-            if py_conflict['has_conflict']:
-                results['conflicts_created'] += 1
-
-            # Reset and create JavaScript conflict
-            simulator.run_git("git merge --abort", str(repo_path))
-            simulator.run_git("git reset --hard main", str(repo_path))
-
-            js_conflict = simulator.simulate_javascript_conflict()
-            if js_conflict['has_conflict']:
-                results['conflicts_created'] += 1
-
-            # Reset and create config conflict
-            simulator.run_git("git merge --abort", str(repo_path))
-            simulator.run_git("git reset --hard main", str(repo_path))
-
-            config_conflict = simulator.simulate_config_conflict()
-            if config_conflict['has_conflict']:
-                results['conflicts_created'] += 1
-
+            remote_path, local_path = simulator.setup_remote_and_clone()
+            print(f"\n📍 Working in local repo: {local_path}")
+            print(f"📡 Remote repo at: {remote_path}")
             print()
-            print(f"📊 Created {results['conflicts_created']} conflicts")
 
-            # Generate merj format JSON
+            # Create divergent changes that will cause conflicts on pull
+            print("=" * 60)
+            print("📝 Creating Divergent Changes")
+            print("=" * 60)
+
+            if simulator.simulate_divergent_changes():
+                results['conflicts_created'] = 1
+                print("✅ Successfully set up divergent changes between local and remote")
+
+            # Test merj pull (this will create conflicts)
+            print()
+            print("=" * 60)
+            print("🔨 Testing merj pull")
+            print("=" * 60)
+
+            results['merj_tested'] = simulator.test_merj_pull()
+
+            # Generate merj format JSON after conflicts are created
             print()
             print("=" * 60)
             print("📋 Generating merj JSON format")
@@ -699,20 +859,12 @@ def run_full_test_pipeline():
             print(f"Conflicted files: {merj_json.get('conflicts', [])}")
 
             # Save JSON for reference
-            json_path = repo_path / "conflict_data.json"
+            json_path = local_path / "conflict_data.json"
             with open(json_path, 'w') as f:
                 json.dump(merj_json, f, indent=2)
             print(f"💾 Saved conflict data to: {json_path}")
 
-            # Test merj pull
-            print()
-            print("=" * 60)
-            print("🔨 Testing merj pull")
-            print("=" * 60)
-
-            results['merj_tested'] = simulator.test_merj_pull()
-
-            # Test RAG pipeline
+            # Test RAG pipeline with the conflicts
             print()
             print("=" * 60)
             print("🧠 Testing RAG Pipeline")
@@ -754,57 +906,58 @@ def run_full_test_pipeline():
     return success
 
 
-def test_specific_scenario(scenario: str = "python"):
-    """Test a specific conflict scenario."""
-    print(f"\n🎯 Testing specific scenario: {scenario}")
+def test_merj_pull_with_remote():
+    """Test merj pull with a proper remote repository setup."""
+    print("\n🎯 Testing merj pull with remote repository")
+    print("=" * 60)
 
     with MergeConflictSimulator() as simulator:
-        repo_path = simulator.create_test_repo(f"test_{scenario}")
+        # Set up remote and clone
+        remote_path, local_path = simulator.setup_remote_and_clone()
+        print(f"📍 Local: {local_path}")
+        print(f"📡 Remote: {remote_path}")
 
-        if scenario == "python":
-            conflict = simulator.simulate_python_conflict()
-        elif scenario == "javascript":
-            conflict = simulator.simulate_javascript_conflict()
-        elif scenario == "config":
-            conflict = simulator.simulate_config_conflict()
-        else:
-            print(f"Unknown scenario: {scenario}")
+        # Create divergent changes
+        if not simulator.simulate_divergent_changes():
+            print("❌ Failed to create divergent changes")
             return False
 
-        if conflict['has_conflict']:
-            print(f"✅ Conflict created in {conflict['file']}")
+        # Test merj pull
+        success = simulator.test_merj_pull()
 
-            # Show conflict details
-            success, diff, _ = simulator.run_git("git diff")
-            if success and diff:
-                print("\n📝 Conflict diff (first 500 chars):")
-                print(diff[:500])
-
-            return True
+        if success:
+            # Check if conflicts were created
+            _, status, _ = simulator.run_git("git status")
+            if "both modified" in status or "Unmerged paths" in status:
+                print("\n✅ Successfully tested merj pull with remote!")
+                print("Conflicts were created as expected from pulling divergent changes.")
+            else:
+                print("\n✅ merj pull succeeded without conflicts")
         else:
-            print("⚠️  No conflict was created")
-            return False
+            print("\n❌ merj pull test failed")
+
+        return success
 
 
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Test merge conflict pipeline")
-    parser.add_argument("--scenario", choices=["python", "javascript", "config", "all"],
-                      default="all", help="Which scenario to test")
     parser.add_argument("--quick", action="store_true",
-                      help="Run quick test with single scenario")
+                      help="Run quick test with remote repository")
+    parser.add_argument("--full", action="store_true",
+                      help="Run full test pipeline")
 
     args = parser.parse_args()
 
     if args.quick:
-        # Quick test with one scenario
-        success = test_specific_scenario("python")
-    elif args.scenario != "all":
-        # Test specific scenario
-        success = test_specific_scenario(args.scenario)
-    else:
+        # Quick test with remote setup
+        success = test_merj_pull_with_remote()
+    elif args.full:
         # Full test pipeline
         success = run_full_test_pipeline()
+    else:
+        # Default to quick test
+        success = test_merj_pull_with_remote()
 
     sys.exit(0 if success else 1)

@@ -2,6 +2,19 @@
 
 This test pipeline simulates merge conflicts in isolated environments to test the `merj pull` functionality without affecting your actual repository.
 
+## ✅ Fixed Issues
+
+The initial version had a fundamental misunderstanding of how `merj pull` works. The test now correctly:
+1. **Sets up a proper remote repository** using a bare git repo
+2. **Creates divergent changes** between local and remote branches
+3. **Uses `merj pull` to fetch and merge**, which naturally creates conflicts
+4. **Bypasses editor prompts** to avoid test timeouts
+
+### Why the Original Test Failed
+- `merj pull` expects to **start from a clean state** and pull from a remote
+- The original test created conflicts locally first, then tried to pull (which git refuses)
+- There was no actual remote repository set up (missing `origin/main`)
+
 ## Features
 
 - Creates temporary git repositories in `/tmp` directory
