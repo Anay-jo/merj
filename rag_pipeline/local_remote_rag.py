@@ -13,13 +13,14 @@ import json
 from typing import List, Dict, Optional, Any
 from dataclasses import asdict
 
-# Add path for chunk_embed_chroma_pipeline
-sys.path.append(os.path.join(os.path.dirname(__file__), 'chunk_embed_chroma_pipeline'))
+# Add current directory to path for local imports
+sys.path.append(os.path.dirname(__file__))
 
 try:
     import chromadb
     from embedder import embed_chunk, embed_chunks
     from chunker import CodeChunk
+    from conflict_processor import chunk_and_embed_conflicts
 except ImportError as e:
     print(f"Error importing required modules: {e}", file=sys.stderr)
     sys.exit(1)
@@ -160,6 +161,116 @@ class LocalRemoteRAG:
         return results
 
 
+def process_git_diff_json(
+    json_input: Dict[str, Any],
+    collection_name: str,
+    k: int = 5,
+    distance_threshold: float = 0.5,
+    db_path: str = "./my_chroma_db",
+    api_key: Optional[str] = None,
+    verbose: bool = True
+) -> Dict[str, Any]:
+    """
+    Process git diff JSON with local and remote changes.
+
+    Args:
+        json_input: Dict with 'lbd' (local vs base) and 'rbd' (remote vs base) keys
+        collection_name: ChromaDB collection name for LCA chunks
+        k: Number of neighbors to retrieve per chunk
+        distance_threshold: Maximum distance for similar chunks
+        db_path: Path to ChromaDB
+        api_key: Voyage AI API key (or use env var)
+        verbose: Print progress information
+
+    Returns:
+        Dict with local_analysis, remote_analysis, and combined RAG results
+    """
+    if verbose:
+        print("=" * 60)
+        print("PROCESSING GIT DIFF JSON")
+        print("=" * 60)
+
+    # Get API key
+    api_key = api_key or os.environ.get("VOYAGE_API_KEY")
+    if not api_key:
+        raise ValueError("VOYAGE_API_KEY not set")
+
+    # Parse input
+    local_diffs = json_input.get("lbd", [])
+    remote_diffs = json_input.get("rbd", [])
+
+    if verbose:
+        print(f"Local diffs: {len(local_diffs)} files")
+        print(f"Remote diffs: {len(remote_diffs)} files")
+        print()
+
+    # Process local changes
+    local_results = []
+    if local_diffs:
+        if verbose:
+            print("Processing LOCAL changes...")
+        local_processed = chunk_and_embed_conflicts(
+            local_diffs, api_key, verbose=verbose
+        )
+        # Extract chunks
+        for file_result in local_processed:
+            local_results.extend(file_result.get("chunks", []))
+
+    # Process remote changes
+    remote_results = []
+    if remote_diffs:
+        if verbose:
+            print("\nProcessing REMOTE changes...")
+        remote_processed = chunk_and_embed_conflicts(
+            remote_diffs, api_key, verbose=verbose
+        )
+        # Extract chunks
+        for file_result in remote_processed:
+            remote_results.extend(file_result.get("chunks", []))
+
+    # Combine all chunks for RAG
+    all_chunks = local_results + remote_results
+
+    if verbose:
+        print(f"\n{'='*60}")
+        print("RAG RETRIEVAL")
+        print(f"{'='*60}")
+        print(f"Total chunks to process: {len(all_chunks)}")
+        print(f"  Local chunks: {len(local_results)}")
+        print(f"  Remote chunks: {len(remote_results)}")
+
+    # Initialize RAG and find similar code
+    rag_results = []
+    if all_chunks:
+        try:
+            rag = LocalRemoteRAG(collection_name, db_path)
+            rag_results = rag.process_chunks(all_chunks, k, distance_threshold)
+
+            if verbose:
+                total_similar = sum(len(r.get("similar_code", [])) for r in rag_results)
+                print(f"\n✓ Found {total_similar} similar code chunks total")
+        except Exception as e:
+            print(f"Warning: RAG retrieval failed: {e}", file=sys.stderr)
+
+    # Structure final output
+    output = {
+        "local_chunks": local_results,
+        "remote_chunks": remote_results,
+        "total_chunks": len(all_chunks),
+        "rag_results": rag_results,
+        "metadata": {
+            "collection": collection_name,
+            "k": k,
+            "threshold": distance_threshold
+        }
+    }
+
+    if verbose:
+        print(f"\n✓ Processing complete!")
+
+    return output
+
+
 def compile_context_for_llm(rag_results: List[Dict], max_context_length: Optional[int] = None) -> str:
     """
     Compile RAG results into a string format suitable for LLM context.
@@ -214,6 +325,7 @@ def main():
     parser.add_argument('-k', type=int, default=5, help='Number of neighbors to retrieve (max 5)')
     parser.add_argument('--threshold', type=float, default=0.5, help='Distance threshold (0.0=identical, 1.0=very different)')
     parser.add_argument('--test', action='store_true', help='Run with test chunks')
+    parser.add_argument('--diff-json', help='Path to git diff JSON file with lbd and rbd keys')
     parser.add_argument('--json', action='store_true', help='Output as JSON')
     args = parser.parse_args()
 
@@ -223,6 +335,40 @@ def main():
         sys.exit(1)
 
     try:
+        # Handle diff JSON input
+        if args.diff_json:
+            # Load and process git diff JSON
+            with open(args.diff_json, 'r') as f:
+                diff_data = json.load(f)
+
+            results = process_git_diff_json(
+                diff_data,
+                args.collection,
+                k=args.k,
+                distance_threshold=args.threshold,
+                db_path=args.db_path,
+                verbose=not args.json
+            )
+
+            if args.json:
+                print(json.dumps(results, indent=2, default=str))
+            else:
+                # Human-readable output
+                print(f"\nProcessed {results['total_chunks']} chunks")
+                print(f"  Local: {len(results['local_chunks'])}")
+                print(f"  Remote: {len(results['remote_chunks'])}")
+
+                if results['rag_results']:
+                    context = compile_context_for_llm(results['rag_results'])
+                    print(f"\nGenerated context ({len(context)} chars):")
+                    print("-" * 40)
+                    print(context[:1000])
+                    if len(context) > 1000:
+                        print("... [truncated]")
+
+            return 0
+
+        # Original test mode
         # Initialize RAG
         rag = LocalRemoteRAG(args.collection, args.db_path)
 
