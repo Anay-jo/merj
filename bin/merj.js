@@ -55,7 +55,7 @@ async function pull(argv) {
               changes.push(change.ln)
           });
       });
-      lvb_diff.push({filefrom: diff.from, fileto: diff.to, lns: changes})
+      lvb_diff.push({filefrom: diff.from, lns: changes})
   });
 
   rvb_diff = []
@@ -68,7 +68,7 @@ async function pull(argv) {
             changes.push(change.ln)
         });
     });
-    rvb_diff.push({filefrom: diff.from, fileto: diff.to, lns: changes})
+    rvb_diff.push({filefrom: diff.from, lns: changes})
   });
 
   const jumbo_json = {
