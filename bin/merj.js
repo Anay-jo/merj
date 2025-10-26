@@ -13,7 +13,94 @@ function hasConflicts() {
   return r.status === 0 && r.stdout.trim().length > 0;
 }
 
-function pull(argv) {
+//This function gives us the diff information source: ChatGPT
+async function getDiffs() {
+  const mergeBase = (await git.raw(['merge-base', 'HEAD', 'origin/main'])).trim();
+
+  //UTF Javascript strings
+  const diffLocalVsBase = await git.diff([`${mergeBase}..HEAD`]);
+  const diffRemoteVsBase = await git.diff([`${mergeBase}..origin/main`]);
+  const diffLocalVsRemote = await git.diff(['HEAD..origin/main']); // may show conflicts
+
+
+  //Turns each of the Javascript strings into JSON strings
+  const parseddiffLocalVsBase = parseDiff(diffLocalVsBase);
+  const parseddiffRemoteVsBase = parseDiff(diffRemoteVsBase);
+  const parseddiffLocalVsRemote = parseDiff(diffLocalVsRemote);
+
+  return {
+    mergeBase,
+    parseddiffLocalVsBase,
+    parseddiffRemoteVsBase,
+    parseddiffLocalVsRemote
+  };
+}
+
+async function pull(argv) {
+
+  const {
+  mergeBase,
+  parseddiffLocalVsBase,
+  parseddiffRemoteVsBase,
+  parseddiffLocalVsRemote
+} = await getDiffs();
+
+  lvb_diff = []
+  //file
+  parseddiffLocalVsBase.forEach((diff) => {
+      //for each chunk/function
+      changes = []
+      diff.chunks.forEach((d) => {
+          d.changes.forEach((change) => {
+              changes.push(change.ln)
+          });
+      });
+      lvb_diff.push({filefrom: diff.from, fileto: diff.to, lns: changes})
+  });
+
+  rvb_diff = []
+
+  parseddiffRemoteVsBase.forEach((diff) => {
+    //for each chunk/function
+    changes = []
+    diff.chunks.forEach((d) => {
+        d.changes.forEach((change) => {
+            changes.push(change.ln)
+        });
+    });
+    rvb_diff.push({filefrom: diff.from, fileto: diff.to, lns: changes})
+  });
+
+  lvr_diff = []
+
+  parseddiffLocalVsRemote.forEach((diff) => {
+    //for each chunk/function
+    changes = []
+    diff.chunks.forEach((d) => {
+        d.changes.forEach((change) => {
+            changes.push(change.ln)
+        });
+    });
+    lvr_diff.push({filefrom: diff.from, fileto: diff.to, lns: changes})
+  });
+
+  const jumbo_json = {
+    lbd: lvb_diff,
+    rbd: rvb_diff
+  }
+
+  try {
+    const response = await fetch('http://127.0.0.1:5000/api/data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(jumbo_json)
+    });
+    const data = await response.json(); // get JSON data
+  } catch (error) {
+    console.error("Error:", error);
+  }
+
+
   const args = ['pull', ...argv.slice(3)]; // pass-through flags
   console.log('➡️  git', args.join(' '));
   const r = run('git', args, { stdio: 'inherit' });
@@ -36,6 +123,7 @@ function pull(argv) {
   const env = { ...process.env };
   if (mainFlag) env.MAIN_REF = mainFlag.split('=')[1];
 
+//Line below is where the script with code rabbit logic is called
   const py = run('python3', ['scripts/review_two_sides_with_cr.py'], { env });
   if (py.status !== 0) {
     console.error(py.stderr || py.stdout || 'CodeRabbit helper failed.');
@@ -105,6 +193,7 @@ function main() {
   const cmd = argv[2];
 
   if (cmd === 'pull') return pull(argv);
+
   return usage();
 }
 
