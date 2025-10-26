@@ -3,4 +3,4 @@ node_modules/
 .merjrc
 .DS_Store
 *.log
-
+.claude

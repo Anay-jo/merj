@@ -392,6 +392,220 @@ class Chunker:
 
         return all_chunks
 
+    def chunk_functions_from_lines(self, file_path: Path, line_numbers: List[int]) -> List[CodeChunk]:
+        """
+        Given line numbers, return unique function chunks containing those lines.
+
+        Args:
+            file_path: Path to the source file
+            line_numbers: List of 1-based line numbers
+
+        Returns:
+            List of unique CodeChunk objects for functions containing the lines
+        """
+        if not file_path.is_file():
+            raise ValueError(f"{file_path} is not a file")
+
+        config = self.should_process_file(file_path)
+        if not config:
+            return []
+
+        lang_name = config["language"]
+        if lang_name not in self.parsers:
+            return []
+
+        parser = self.parsers[lang_name]
+        top_level_nodes = config["top_level_nodes"]
+
+        try:
+            with open(file_path, 'rb') as f:
+                content_bytes = f.read()
+
+            if not content_bytes:
+                return []
+
+            tree = parser.parse(content_bytes)
+            root = tree.root_node
+
+            try:
+                content_str = content_bytes.decode('utf-8')
+            except UnicodeDecodeError:
+                return []
+
+            content_lines = content_str.splitlines()
+
+            # Convert line numbers to 0-based for tree-sitter
+            zero_based_lines = set(line - 1 for line in line_numbers if line > 0)
+
+            # Find unique functions containing the given lines
+            unique_functions = set()
+            processed_chunks = []
+
+            for line_num in zero_based_lines:
+                function_node = self._find_function_at_line(root, line_num, top_level_nodes)
+                if function_node:
+                    # Use node's start and end points as unique identifier
+                    node_id = (function_node.start_point[0], function_node.end_point[0])
+                    if node_id not in unique_functions:
+                        unique_functions.add(node_id)
+
+                        # Create chunk for this function
+                        start_line = function_node.start_point[0]
+                        end_line = function_node.end_point[0]
+                        chunk_lines = content_lines[start_line:end_line + 1]
+                        chunk_content = '\n'.join(chunk_lines)
+
+                        # Get function signature (first line)
+                        chunk_signature = chunk_lines[0].strip() if chunk_lines else ""
+
+                        if chunk_content.strip():
+                            chunk_type = self._determine_chunk_type(function_node.type)
+                            chunk = CodeChunk(
+                                file_path=str(file_path),
+                                language=lang_name,
+                                signature=chunk_signature,
+                                content=chunk_content,
+                                chunk_type=chunk_type,
+                                start_line=start_line + 1,  # Convert back to 1-based
+                                end_line=end_line + 1,
+                                node_types=[function_node.type]
+                            )
+                            processed_chunks.append(chunk)
+
+            return processed_chunks
+
+        except Exception as e:
+            print(f"Error processing {file_path}: {e}")
+            return []
+
+    def _find_function_at_line(self, node, line_number: int, top_level_nodes: Set[str]) -> Optional[object]:
+        """
+        Recursively find the innermost function/class containing the given line.
+
+        Args:
+            node: Current tree-sitter node
+            line_number: 0-based line number
+            top_level_nodes: Set of node types to consider as functions/classes
+
+        Returns:
+            The innermost function/class node containing the line, or None
+        """
+        # Check if this node is a function/class and contains the line
+        if (node.type in top_level_nodes and
+            node.start_point[0] <= line_number <= node.end_point[0]):
+
+            # Check if any child is a more specific function containing this line
+            for child in node.named_children:
+                inner_function = self._find_function_at_line(child, line_number, top_level_nodes)
+                if inner_function:
+                    return inner_function
+
+            # No inner function found, this node is the innermost
+            return node
+
+        # Not a function or doesn't contain the line, check children
+        for child in node.named_children:
+            result = self._find_function_at_line(child, line_number, top_level_nodes)
+            if result:
+                return result
+
+        return None
+
+    def map_lines_to_functions(self, file_path: Path, line_numbers: List[int]) -> Dict[int, Optional[CodeChunk]]:
+        """
+        Map each line number to its containing function chunk.
+
+        Args:
+            file_path: Path to the source file
+            line_numbers: List of 1-based line numbers
+
+        Returns:
+            Dictionary mapping line numbers to their containing function chunks
+        """
+        if not file_path.is_file():
+            raise ValueError(f"{file_path} is not a file")
+
+        config = self.should_process_file(file_path)
+        if not config:
+            return {line: None for line in line_numbers}
+
+        lang_name = config["language"]
+        if lang_name not in self.parsers:
+            return {line: None for line in line_numbers}
+
+        parser = self.parsers[lang_name]
+        top_level_nodes = config["top_level_nodes"]
+
+        line_to_chunk = {}
+
+        try:
+            with open(file_path, 'rb') as f:
+                content_bytes = f.read()
+
+            if not content_bytes:
+                return {line: None for line in line_numbers}
+
+            tree = parser.parse(content_bytes)
+            root = tree.root_node
+
+            try:
+                content_str = content_bytes.decode('utf-8')
+            except UnicodeDecodeError:
+                return {line: None for line in line_numbers}
+
+            content_lines = content_str.splitlines()
+
+            # Cache for already created chunks
+            node_to_chunk = {}
+
+            for line_num in line_numbers:
+                if line_num <= 0 or line_num > len(content_lines):
+                    line_to_chunk[line_num] = None
+                    continue
+
+                zero_based_line = line_num - 1
+                function_node = self._find_function_at_line(root, zero_based_line, top_level_nodes)
+
+                if function_node:
+                    # Use node's start and end as cache key
+                    node_id = (function_node.start_point[0], function_node.end_point[0])
+
+                    if node_id not in node_to_chunk:
+                        # Create chunk for this function
+                        start_line = function_node.start_point[0]
+                        end_line = function_node.end_point[0]
+                        chunk_lines = content_lines[start_line:end_line + 1]
+                        chunk_content = '\n'.join(chunk_lines)
+
+                        # Get function signature (first line)
+                        chunk_signature = chunk_lines[0].strip() if chunk_lines else ""
+
+                        if chunk_content.strip():
+                            chunk_type = self._determine_chunk_type(function_node.type)
+                            chunk = CodeChunk(
+                                file_path=str(file_path),
+                                language=lang_name,
+                                signature=chunk_signature,
+                                content=chunk_content,
+                                chunk_type=chunk_type,
+                                start_line=start_line + 1,  # Convert back to 1-based
+                                end_line=end_line + 1,
+                                node_types=[function_node.type]
+                            )
+                            node_to_chunk[node_id] = chunk
+                        else:
+                            node_to_chunk[node_id] = None
+
+                    line_to_chunk[line_num] = node_to_chunk[node_id]
+                else:
+                    line_to_chunk[line_num] = None
+
+            return line_to_chunk
+
+        except Exception as e:
+            print(f"Error processing {file_path}: {e}")
+            return {line: None for line in line_numbers}
+
 
 def save_chunks(chunks: List[CodeChunk], output_path: Path):
     """Save chunks to JSON file."""

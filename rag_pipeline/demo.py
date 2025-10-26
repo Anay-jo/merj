@@ -107,6 +107,100 @@ if __name__ == "__main__":
     print(f"\nGenerated {len(chunks)} chunks")
 
     # ========================================
+    # PART 1.5: LINE-BASED CHUNKING (NEW FEATURE)
+    # ========================================
+    print("\n" + "=" * 60)
+    print("PART 1.5: LINE-BASED CHUNKING (NEW FEATURE)")
+    print("=" * 60)
+    print("\nTesting the new line-based function chunking capabilities...")
+
+    # Test 1: chunk_functions_from_lines with duplicate lines
+    print("\n[TEST 1: chunk_functions_from_lines()]")
+    print("-" * 40)
+
+    # Line numbers from different parts of the sample code
+    # Including duplicates and lines outside functions
+    test_lines = [
+        49, 50,  # Calculator.add method (49 twice for duplicate test)
+        49,      # Duplicate line - should only get one chunk
+        56,      # Calculator.multiply method
+        63, 65,  # fibonacci function (multiple lines from same function)
+        77,      # process_data function
+        40,      # Global variable (outside any function)
+        86,      # Main block
+        100      # Invalid line number (beyond file)
+    ]
+
+    print(f"Input line numbers: {test_lines}")
+    print("\nFinding unique function chunks containing these lines...")
+
+    line_chunks = chunker.chunk_functions_from_lines(sample_file, test_lines)
+
+    print(f"\n✓ Found {len(line_chunks)} unique function/class chunks:")
+    for i, chunk in enumerate(line_chunks, 1):
+        print(f"\n  [{i}] {chunk.chunk_type.upper()}")
+        print(f"      Signature: {chunk.signature[:60]}...")
+        print(f"      Lines: {chunk.start_line}-{chunk.end_line}")
+        print(f"      First line of content: {chunk.content.splitlines()[0][:60]}...")
+
+    # Test 2: map_lines_to_functions
+    print("\n[TEST 2: map_lines_to_functions()]")
+    print("-" * 40)
+
+    # Smaller set of lines for clearer mapping demonstration
+    mapping_test_lines = [35, 40, 49, 63, 77, 86, 100]
+
+    print(f"Input line numbers: {mapping_test_lines}")
+    print("\nMapping each line to its containing function/class...")
+
+    line_to_chunk_map = chunker.map_lines_to_functions(sample_file, mapping_test_lines)
+
+    print("\nLine → Function/Class Mapping:")
+    for line_num in sorted(mapping_test_lines):
+        chunk = line_to_chunk_map.get(line_num)
+        if chunk:
+            print(f"  Line {line_num:3d} → {chunk.chunk_type}: {chunk.signature[:40]}...")
+        else:
+            print(f"  Line {line_num:3d} → (not in any function/class)")
+
+    # Test 3: Simulating a merge conflict scenario
+    print("\n[TEST 3: Merge Conflict Scenario]")
+    print("-" * 40)
+    print("\nSimulating merge conflict resolution...")
+    print("Imagine we have conflicts at these lines:")
+
+    conflict_lines = [48, 49, 50, 51, 52]  # All within Calculator.add method
+
+    print(f"  Conflict markers at lines: {conflict_lines}")
+    print("\nGetting function context for conflict resolution...")
+
+    conflict_chunks = chunker.chunk_functions_from_lines(sample_file, conflict_lines)
+
+    if conflict_chunks:
+        print(f"\n✓ Conflict is within {len(conflict_chunks)} function(s):")
+        for chunk in conflict_chunks:
+            print(f"\n  Function: {chunk.signature}")
+            print(f"  Full context (lines {chunk.start_line}-{chunk.end_line}):")
+            print("  " + "-" * 36)
+            for line in chunk.content.splitlines()[:8]:  # Show first 8 lines
+                print(f"    {line}")
+            if len(chunk.content.splitlines()) > 8:
+                print(f"    ... ({len(chunk.content.splitlines()) - 8} more lines)")
+            print("  " + "-" * 36)
+            print("\n  → This context helps understand what the conflicting code does!")
+
+    # Summary comparison
+    print("\n[COMPARISON: Regular vs Line-Based Chunking]")
+    print("-" * 40)
+    print(f"Regular chunking (entire file):     {len(chunks)} chunks")
+    print(f"Line-based chunking (specific lines): {len(line_chunks)} chunks")
+    print("\nKey advantages of line-based chunking:")
+    print("  • Get only the relevant functions for specific lines")
+    print("  • No duplicate chunks even with duplicate line numbers")
+    print("  • Perfect for merge conflicts, error tracing, code review")
+    print("  • More efficient for targeted analysis")
+
+    # ========================================
     # PART 2: EMBEDDING
     # ========================================
     print("\n" + "=" * 60)
