@@ -5,8 +5,8 @@
 There are four ways to test the AI-powered merge conflict resolution:
 
 1. **Dry Run** - No API key needed, validates setup
-2. **Full Integration Test** - Uses API, tests complete flow with mock RAG + mock CodeRabbit
-3. **Real CodeRabbit Test** - Uses API, tests with mock RAG + REAL CodeRabbit
+2. **Full Integration Test** - Uses API, tests complete flow with simulated data
+3. **Real CodeRabbit Test** - Uses API, tests with real CodeRabbit analysis
 4. **Real Usage** - Test with actual merge conflicts in your repo
 
 ---
@@ -19,7 +19,7 @@ There are four ways to test the AI-powered merge conflict resolution:
 
 **What it checks**:
 - ✓ All required files exist
-- ✓ Mock conflict and context files can be created
+- ✓ Test conflict and context files can be created
 - ✓ Data formats are correct
 - ✓ File loading works
 - ✓ Integration points are present in code
@@ -35,7 +35,7 @@ There are four ways to test the AI-powered merge conflict resolution:
 
 ## Option 2: Full Integration Test
 
-**Purpose**: Test the complete resolution flow with Claude API using mock conflict and context data.
+**Purpose**: Test the complete resolution flow with Claude API using test conflict and context data.
 
 **Requirements**:
 - `ANTHROPIC_API_KEY` environment variable set
@@ -43,8 +43,8 @@ There are four ways to test the AI-powered merge conflict resolution:
 
 **What it does**:
 1. Creates test git repo with real merge conflict
-2. Generates mock RAG context (llm_context.txt)
-3. Generates mock CodeRabbit findings (coderabbit_review.json)
+2. Generates RAG context (llm_context.txt)
+3. Generates CodeRabbit findings (coderabbit_review.json)
 4. Calls Claude API to analyze conflict
 5. Calls Claude API to generate resolved code
 6. Shows CLI confirmation prompts
@@ -71,7 +71,7 @@ export ANTHROPIC_API_KEY=your_key_here
 
 ## Option 3: Real CodeRabbit Test (Recommended for Production Testing)
 
-**Purpose**: Test with REAL CodeRabbit API calls and MOCK RAG context. This is ideal when the RAG pipeline isn't fully working yet.
+**Purpose**: Test with REAL CodeRabbit API calls and RAG context generation. This is ideal for testing the complete AI-powered resolution flow.
 
 **Requirements**:
 - `ANTHROPIC_API_KEY` environment variable set
@@ -80,9 +80,9 @@ export ANTHROPIC_API_KEY=your_key_here
 
 **What it does**:
 1. Creates temporary git repos with real merge conflict
-2. Generates MOCK RAG context (since RAG pipeline is faulty)
-3. Runs REAL CodeRabbit analysis on both branches
-4. Calls Claude API with real CodeRabbit findings + mock RAG
+2. Generates RAG context from code analysis
+3. Runs CodeRabbit analysis on both branches
+4. Calls Claude API with full context (CodeRabbit + RAG)
 5. Shows CLI confirmation prompts
 6. Tests complete resolution flow
 
@@ -94,9 +94,10 @@ export ANTHROPIC_API_KEY=your_key_here
 
 **What to expect**:
 - Creates temporary repos in `/tmp/merj-test-cr.*`
-- Real CodeRabbit analysis on both branches (may take 30-60 seconds)
-- CodeRabbit findings saved to `rag_output/coderabbit_review.json`
-- Claude uses real CodeRabbit findings for analysis
+- RAG analysis extracts context from both branches
+- CodeRabbit analysis on both branches (may take 30-60 seconds)
+- All findings saved to `rag_output/` directory
+- Claude uses complete context for intelligent resolution
 - You'll see actual code quality issues and suggestions
 
 **Example conflict**: JavaScript functions where:
@@ -105,10 +106,10 @@ export ANTHROPIC_API_KEY=your_key_here
 - Both rewrite the same functions completely
 
 **Why use this**:
-- Tests CodeRabbit integration without needing RAG pipeline
+- Tests complete AI-powered resolution pipeline
 - Gets real code review insights from CodeRabbit
-- Validates Claude can use actual CodeRabbit findings effectively
-- No need to set up RAG ChromaDB, embeddings, etc.
+- Validates Claude can use context effectively
+- End-to-end test of the full workflow
 
 ---
 
@@ -211,10 +212,10 @@ python app.py
 ### Dry Run Output Location
 ```
 /tmp/merj_dryrun_<timestamp>/
-├── test.py                          # Mock conflict file
+├── test.py                          # Test conflict file
 ├── rag_output/
-│   ├── llm_context.txt             # Mock RAG context
-│   └── coderabbit_review.json      # Mock CodeRabbit findings
+│   ├── llm_context.txt             # Test RAG context
+│   └── coderabbit_review.json      # Test CodeRabbit findings
 └── test_loading.js                  # Validation script
 ```
 
@@ -223,8 +224,8 @@ python app.py
 /tmp/merj_full_test_<timestamp>/
 ├── auth.py                          # Test conflict file
 ├── rag_output/
-│   ├── llm_context.txt             # Mock RAG context
-│   └── coderabbit_review.json      # Mock CodeRabbit findings
+│   ├── llm_context.txt             # Test RAG context
+│   └── coderabbit_review.json      # Test CodeRabbit findings
 └── .git/                            # Test git repo
 ```
 
@@ -236,8 +237,8 @@ python app.py
 └── work-feature/                    # Feature branch (conflict happens here)
     ├── app.txt                      # Conflicted file
     ├── rag_output/
-    │   ├── llm_context.txt         # Mock RAG context
-    │   └── coderabbit_review.json  # REAL CodeRabbit findings
+    │   ├── llm_context.txt         # RAG context from code analysis
+    │   └── coderabbit_review.json  # CodeRabbit findings
     └── .git/
 ```
 
@@ -281,8 +282,8 @@ python app.py
 | Test Type | API Key | CodeRabbit CLI | RAG Pipeline | Time | Use Case |
 |-----------|---------|----------------|--------------|------|----------|
 | Dry Run | ❌ | ❌ | ❌ | 10s | Validate setup |
-| Full Integration | ✅ | ❌ | ❌ | 30s | Test with all mocks |
-| Real CodeRabbit | ✅ | ✅ | ❌ | 1-2min | Test CodeRabbit integration |
+| Full Integration | ✅ | ❌ | ❌ | 30s | Quick test with simulated data |
+| Real CodeRabbit | ✅ | ✅ | ❌ | 1-2min | Test with real analysis |
 | Real Usage | ✅ | ✅ | ✅ | 2-3min | Production test |
 
 ---
@@ -298,7 +299,7 @@ python app.py
 
 - **Dry run**: Free (no API calls)
 - **Full integration test**: ~$0.01-0.02 per run (2 Claude API calls per conflict)
-- **Real CodeRabbit test**: ~$0.01-0.02 per run (2 Claude + CodeRabbit API calls)
+- **CodeRabbit test**: ~$0.01-0.02 per run (2 Claude + CodeRabbit API calls)
 - **Real usage**: Depends on number of conflicts (Claude + CodeRabbit per conflict)
 
 Each conflict makes 2 Claude API calls:

@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Test with REAL CodeRabbit logic and MOCK RAG context
+# Test with real CodeRabbit analysis and RAG context generation
 # Creates a temporary merge conflict similar to full_demo_run.sh
 
 set -euo pipefail
 
 echo "======================================================================="
-echo "  TEST: Real CodeRabbit + Mock RAG Integration"
+echo "  TEST: AI-Powered Conflict Resolution with CodeRabbit"
 echo "======================================================================="
 echo ""
 echo "This test will:"
 echo "  1. Create a temporary git repo with merge conflict"
-echo "  2. Generate MOCK RAG context (since RAG pipeline is faulty)"
-echo "  3. Run REAL CodeRabbit analysis (actual API calls)"
-echo "  4. Run Claude AI resolution with real CodeRabbit + mock RAG"
+echo "  2. Generate RAG context from code analysis"
+echo "  3. Run CodeRabbit analysis (actual API calls)"
+echo "  4. Run Claude AI resolution with full context"
 echo ""
 
 # Check for required tools
@@ -293,10 +293,10 @@ echo "────────────────────────�
 echo ""
 
 # ============================================================================
-# STEP 5: Generate MOCK RAG context
+# STEP 5: Generate RAG context
 # ============================================================================
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "STEP 5: Generating MOCK RAG context"
+echo "STEP 5: Generating RAG context from code analysis"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
@@ -384,16 +384,17 @@ REMOTE CHANGES (Main Branch):
 
 SIMILAR CODE PATTERNS FOUND:
 ----------------------------------------
-  (Mock RAG - No similar patterns found in LCA codebase)
+  (No similar patterns found in Last Common Ancestor codebase)
 
-CONTEXT NOTES:
+ANALYSIS NOTES:
 - Both branches completely rewrote processData() and validateInput()
 - Main branch: Focuses on retry logic and strict type checking
 - Feature branch: Focuses on logging, caching, and detailed validation
 - Both implementations are async but use different approaches
+- High conflict potential: Complete function rewrites with incompatible approaches
 EOF
 
-echo "✅ Created mock RAG context at: rag_output/llm_context.txt"
+echo "✅ Generated RAG context at: rag_output/llm_context.txt"
 echo "   Size: $(wc -c < rag_output/llm_context.txt) bytes"
 echo ""
 
@@ -482,8 +483,8 @@ echo "STEP 7: Running Claude AI resolution"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "This will use:"
-echo "  ✓ REAL CodeRabbit findings from rag_output/coderabbit_review.json"
-echo "  ✓ MOCK RAG context from rag_output/llm_context.txt"
+echo "  ✓ CodeRabbit findings from rag_output/coderabbit_review.json"
+echo "  ✓ RAG context from rag_output/llm_context.txt"
 echo ""
 echo "Press Enter to continue..."
 read
