@@ -14,20 +14,6 @@ function hasConflicts() {
   return r.status === 0 && r.stdout.trim().length > 0;
 }
 
-function listConflictedFiles() {
-  const r = run('git', ['ls-files', '-u']);
-  if (r.status !== 0 || !r.stdout.trim()) return [];
-
-  const lines = r.stdout.trim().split('\n');
-  const files = new Set();
-  for (const ln of lines) {
-    const parts = ln.trim().split(/\s+/);
-    const file = parts[3];
-    if (file) files.add(file);
-  }
-  return [...files];
-}
-
 //This function gives us the diff information source: ChatGPT
 async function getDiffs() {
   const mergeBase = (await git.raw(['merge-base', 'HEAD', 'origin/main'])).trim();
@@ -204,82 +190,120 @@ async function pull(argv) {
   summarize('main since BASE',  mainReview);
   summarize('local since BASE', localReview);
 
-  // Now attempt AI-powered resolution for each conflicted file
-  console.log('\n🤖 Starting AI-powered conflict resolution...\n');
-
-  const conflictedFiles = listConflictedFiles();
-  if (conflictedFiles.length === 0) {
-    console.log('✅ No conflicted files found. Merge appears complete.');
+  // Auto-resolve conflicts using Claude
+  console.log('\n🤖 Auto-resolving conflicts with Claude AI...\n');
+  
+  // Get list of conflicted files
+  const conflictedFiles = run('git', ['diff', '--name-only', '--diff-filter=U']);
+  if (conflictedFiles.status !== 0) {
+    console.error('❌ Failed to get conflicted files');
+    process.exit(1);
+  }
+  
+  const files = conflictedFiles.stdout.trim().split('\n').filter(Boolean);
+  
+  if (files.length === 0) {
+    console.log('✅ No conflicts to resolve');
     process.exit(0);
   }
-
-  console.log(`📋 Found ${conflictedFiles.length} conflicted file(s):`);
-  conflictedFiles.forEach((f, i) => console.log(`   ${i + 1}. ${f}`));
+  
+  console.log(`📝 Found ${files.length} conflicted file(s):`);
+  files.forEach((f, i) => console.log(`   ${i + 1}. ${f}`));
   console.log('');
-
+  
   let resolvedCount = 0;
-  let rejectedCount = 0;
   let failedCount = 0;
-
-  for (let i = 0; i < conflictedFiles.length; i++) {
-    const file = conflictedFiles[i];
-    console.log(`\n${'='.repeat(70)}`);
-    console.log(`📄 Processing file ${i + 1}/${conflictedFiles.length}: ${file}`);
-    console.log('='.repeat(70));
-
-    const resolveCmd = run('node', [
-      path.join(__dirname, 'resolve_with_prompt.js'),
-      '--file',
-      file
-    ], { stdio: 'inherit' });
-
-    if (resolveCmd.status === 0) {
-      resolvedCount++;
-      console.log(`✅ File ${i + 1}/${conflictedFiles.length} resolved successfully\n`);
-    } else if (resolveCmd.status === 1) {
-      rejectedCount++;
-      console.log(`⚠️  File ${i + 1}/${conflictedFiles.length} resolution rejected by user\n`);
+  
+  for (const file of files) {
+    console.log(`🔧 Resolving: ${file}`);
+    
+    // Call resolve_with_claude.js for this file
+    const resolverPath = path.join(__dirname, 'resolve_with_claude.js');
+    const resolveResult = run('node', [resolverPath, '--file', file], { 
+      stdio: 'pipe',
+      env: { ...process.env }
+    });
+    
+    if (resolveResult.status === 0) {
+      // The resolver writes to /tmp/merged_suggestions by default
+      // Copy the resolved file back to the working directory
+      const OUTPUT_ROOT = process.env.MERGE_OUTPUT_ROOT || '/tmp/merged_suggestions';
+      const resolvedPath = path.join(OUTPUT_ROOT, file);
+      
+      if (fs.existsSync(resolvedPath)) {
+        // Copy resolved file to working directory
+        const workingPath = path.join(process.cwd(), file);
+        fs.copyFileSync(resolvedPath, workingPath);
+        
+        // Stage the resolved file
+        const addResult = run('git', ['add', file]);
+        if (addResult.status === 0) {
+          console.log(`   ✅ Resolved and staged: ${file}`);
+          resolvedCount++;
+        } else {
+          console.log(`   ⚠️  Resolved but failed to stage: ${file}`);
+          failedCount++;
+        }
+      } else {
+        console.log(`   ⚠️  Resolution file not found: ${file}`);
+        failedCount++;
+      }
     } else {
+      console.log(`   ❌ Failed to resolve: ${file}`);
+      console.log(resolveResult.stderr || resolveResult.stdout);
       failedCount++;
-      console.log(`❌ File ${i + 1}/${conflictedFiles.length} resolution failed\n`);
     }
+    console.log('');
   }
-
-  // Summary
-  console.log('\n' + '='.repeat(70));
-  console.log('📊 RESOLUTION SUMMARY');
-  console.log('='.repeat(70));
-  console.log(`✅ Resolved and applied: ${resolvedCount}`);
-  console.log(`⚠️  Rejected by user: ${rejectedCount}`);
-  console.log(`❌ Failed: ${failedCount}`);
-  console.log(`📋 Total conflicts: ${conflictedFiles.length}\n`);
-
-  if (resolvedCount === conflictedFiles.length) {
-    console.log('🎉 All conflicts resolved! Complete the merge:');
-    console.log('   git merge --continue');
-    console.log('   (or git rebase --continue if rebasing)\n');
-    process.exit(0);
-  } else if (resolvedCount > 0) {
-    console.log('⚠️  Some conflicts remain. Review and resolve manually:');
-    console.log('   - Check files that were rejected or failed');
-    console.log('   - When ready: git merge --continue\n');
-    process.exit(2);
+  
+  console.log(`\n📊 Resolution Summary:`);
+  console.log(`   ✅ Resolved: ${resolvedCount}/${files.length}`);
+  console.log(`   ❌ Failed: ${failedCount}/${files.length}`);
+  
+  if (resolvedCount === files.length) {
+    console.log('\n🎉 All conflicts resolved! Committing...');
+    
+    // Complete the merge
+    const commitResult = run('git', ['commit', '--no-edit'], { stdio: 'inherit' });
+    
+    if (commitResult.status === 0) {
+      console.log('✅ Merge completed successfully!');
+      process.exit(0);
+    } else {
+      console.log('⚠️  Please manually commit the changes:');
+      console.log('   git commit --no-edit');
+      process.exit(2);
+    }
   } else {
-    console.log('❌ No conflicts were automatically resolved.');
-    console.log('👉 Resolve manually, then: git merge --continue\n');
+    console.log('\n⚠️  Some conflicts remain unresolved.');
+    console.log('👉 Please manually resolve the remaining conflicts and run:');
+    console.log('   git merge --continue');
     process.exit(2);
   }
 }
 
 function usage() {
-  console.log(`merj – git pull wrapper with CodeRabbit side review
+  console.log(`merj – git pull wrapper with automated conflict resolution
 Usage:
   merj pull [--main=origin/main] [any git pull flags…]
+
+Features:
+  • Runs git pull
+  • Detects merge conflicts
+  • Generates RAG context from code history
+  • Runs CodeRabbit reviews on both branches
+  • Automatically resolves conflicts using Claude AI
+  • Auto-commits resolved changes
 
 Examples:
   merj pull
   merj pull --rebase
   merj pull --main=origin/dev
+
+Environment Variables:
+  ANTHROPIC_API_KEY - Required for Claude AI resolution
+  MODEL - Claude model to use (default: claude-3-5-sonnet-20240620)
+  VOYAGE_API_KEY - Optional for RAG pipeline
 `);
 }
 

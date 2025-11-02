@@ -265,17 +265,164 @@ program
     if (cr) {
       summarizeCodeRabbit('main since BASE',  cr.mainReview,  cr.mainTxt);
       summarizeCodeRabbit('local since BASE', cr.localReview, cr.localTxt);
+      
+      // Save CodeRabbit findings for Claude to use
+      const codeRabbitOutput = {
+        mainBranchReview: cr.mainReview,
+        localBranchReview: cr.localReview,
+        timestamp: new Date().toISOString()
+      };
+      
+      // Ensure rag_output directory exists
+      const ragOutputDir = path.join(repoRoot, 'rag_output');
+      if (!fs.existsSync(ragOutputDir)) {
+        fs.mkdirSync(ragOutputDir, { recursive: true });
+      }
+      
+      // Save CodeRabbit findings to file
+      const codeRabbitPath = path.join(ragOutputDir, 'coderabbit_review.json');
+      try {
+        fs.writeFileSync(codeRabbitPath, JSON.stringify(codeRabbitOutput, null, 2), 'utf-8');
+        console.log('📝 Saved CodeRabbit findings to rag_output/coderabbit_review.json');
+      } catch (e) {
+        console.error('⚠️  Failed to save CodeRabbit findings:', e.message);
+      }
     } else {
       console.log('⚠️  Skipping CodeRabbit summary (helper not available or produced no output).');
     }
 
-    console.log('\n👉 Next steps:\n' +
-      '   • Use your merge assistant / editor to resolve remaining conflicts.\n' +
-      '   • When done:  git add <files> && git merge --continue\n' +
-      '   • If you pulled with --rebase, run: git rebase --continue\n');
-
-    // Non-zero so shells/CI know the merge isn’t finished yet.
-    process.exit(2);
+    // Get list of conflicted files
+    const conflictedFiles = run('git', ['diff', '--name-only', '--diff-filter=U'], { cwd: repoRoot });
+    if (conflictedFiles.status !== 0) {
+      console.error('❌ Failed to get conflicted files');
+      process.exit(1);
+    }
+    
+    const files = conflictedFiles.stdout.trim().split('\n').filter(Boolean);
+    
+    if (files.length === 0) {
+      console.log('✅ No conflicts to resolve');
+      process.exit(0);
+    }
+    
+    // Show conflict summary
+    console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('📋 MERGE CONFLICT SUMMARY');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log(`\n🔍 Detected ${files.length} conflicted file(s):\n`);
+    
+    files.forEach((f, i) => {
+      console.log(`   ${i + 1}. ${f}`);
+      
+      // Show conflict markers count for each file
+      const filePath = path.join(repoRoot, f);
+      try {
+        const content = fs.readFileSync(filePath, 'utf-8');
+        const conflictCount = (content.match(/^<{7} /gm) || []).length;
+        console.log(`      └─ ${conflictCount} conflict marker(s) detected`);
+      } catch (e) {
+        console.log(`      └─ Unable to read file`);
+      }
+    });
+    
+    console.log('\n📊 Resolution Strategy:');
+    console.log('   • Using Claude AI with RAG context and CodeRabbit findings');
+    console.log('   • Each file will be analyzed and automatically resolved');
+    console.log('   • Resolved files will be staged for commit');
+    
+    console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+    
+    // Ask for user confirmation
+    const { proceed } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'proceed',
+        message: '🤖 Proceed with automatic conflict resolution?',
+        default: true
+      }
+    ]);
+    
+    if (!proceed) {
+      console.log('\n⚠️  Automatic resolution cancelled by user.');
+      console.log('👉 To resolve manually:\n' +
+        '   • Edit the conflicted files\n' +
+        '   • git add <files>\n' +
+        '   • git merge --continue\n');
+      process.exit(2);
+    }
+    
+    console.log('\n🤖 Starting automatic conflict resolution...\n');
+    
+    let resolvedCount = 0;
+    let failedCount = 0;
+    
+    for (const file of files) {
+      console.log(`🔧 Resolving: ${file}`);
+      
+      // Call resolve_with_claude.js for this file
+      const resolverPath = path.join(__dirname, 'resolve_with_claude.js');
+      const resolveResult = run('node', [resolverPath, '--file', file], { 
+        stdio: 'pipe',
+        cwd: repoRoot,
+        env: { ...process.env }
+      });
+      
+      if (resolveResult.status === 0) {
+        // The resolver writes to /tmp/merged_suggestions by default
+        // Copy the resolved file back to the working directory
+        const OUTPUT_ROOT = process.env.MERGE_OUTPUT_ROOT || '/tmp/merged_suggestions';
+        const resolvedPath = path.join(OUTPUT_ROOT, file);
+        
+        if (fs.existsSync(resolvedPath)) {
+          // Copy resolved file to working directory
+          const workingPath = path.join(repoRoot, file);
+          fs.copyFileSync(resolvedPath, workingPath);
+          
+          // Stage the resolved file
+          const addResult = run('git', ['add', file], { cwd: repoRoot });
+          if (addResult.status === 0) {
+            console.log(`   ✅ Resolved and staged: ${file}`);
+            resolvedCount++;
+          } else {
+            console.log(`   ⚠️  Resolved but failed to stage: ${file}`);
+            failedCount++;
+          }
+        } else {
+          console.log(`   ⚠️  Resolution file not found: ${file}`);
+          failedCount++;
+        }
+      } else {
+        console.log(`   ❌ Failed to resolve: ${file}`);
+        if (resolveResult.stderr) console.log(resolveResult.stderr);
+        failedCount++;
+      }
+      console.log('');
+    }
+    
+    console.log(`\n📊 Resolution Summary:`);
+    console.log(`   ✅ Resolved: ${resolvedCount}/${files.length}`);
+    console.log(`   ❌ Failed: ${failedCount}/${files.length}`);
+    
+    if (resolvedCount === files.length) {
+      console.log('\n🎉 All conflicts resolved! Committing...');
+      
+      // Complete the merge
+      const commitResult = runInherit('git', ['commit', '--no-edit'], { cwd: repoRoot });
+      
+      if (commitResult.status === 0) {
+        console.log('✅ Merge completed successfully!');
+        process.exit(0);
+      } else {
+        console.log('⚠️  Please manually commit the changes:');
+        console.log('   git commit --no-edit');
+        process.exit(2);
+      }
+    } else {
+      console.log('\n⚠️  Some conflicts remain unresolved.');
+      console.log('👉 Please manually resolve the remaining conflicts and run:');
+      console.log('   git merge --continue');
+      process.exit(2);
+    }
   });
 
 program

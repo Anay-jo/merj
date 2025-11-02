@@ -12,7 +12,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const API_KEY = process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC;
-const MODEL = process.env.MODEL || 'claude-3-5-sonnet-20241022';
+const MODEL = 'claude-sonnet-4-5';
 
 function assertInGitRepo() {
   const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf-8' });
@@ -55,7 +55,26 @@ function loadRAGContext() {
       const preview = content.substring(0, 200).replace(/\n/g, ' ');
       console.log(`   Preview: ${preview}${content.length > 200 ? '...' : ''}`);
 
-      return content;
+      // Format RAG context for appending with CodeRabbit context
+      let formattedContext = [];
+      
+      // Add header for RAG context
+      formattedContext.push('=== RAG CODE CHUNKS CONTEXT ===');
+      formattedContext.push('(Similar code patterns and chunks for merge conflict resolution)');
+      formattedContext.push('');
+      
+      // Add the original RAG content
+      formattedContext.push(content);
+      
+      // Add clear separator for appending with CodeRabbit context
+      formattedContext.push('');
+      formattedContext.push('=== END RAG CONTEXT ===');
+      formattedContext.push('');
+
+      const formatted = formattedContext.join('\n');
+      console.log(`   RAG context formatted for CodeRabbit appending`);
+
+      return formatted;
     } else {
       console.log('⚠️  RAG context file not found at:', ragContextPath);
       console.log('   Run "merj pull" first to generate RAG context');
@@ -76,39 +95,61 @@ function loadCodeRabbitContext() {
 
       console.log('🐰 Loaded CodeRabbit findings from:', codeRabbitPath);
 
-      // Format the findings into readable text
+      // Format the findings into readable text optimized for appending with RAG chunks
       let formattedContext = [];
+      
+      // Add header for semantic context
+      formattedContext.push('=== CODERABBIT SEMANTIC CONTEXT ===');
+      formattedContext.push('(Automated code review findings for merge conflict resolution)');
+      formattedContext.push('');
 
       // Process main branch review
       if (data.mainBranchReview) {
-        formattedContext.push('## CodeRabbit Review - Main Branch Changes:');
+        formattedContext.push('## Main Branch Changes (Remote/Incoming):');
         const findings = extractFindings(data.mainBranchReview);
         if (findings.length > 0) {
           findings.forEach((f, i) => {
             formattedContext.push(`${i+1}. ${f.file}:${f.line} - ${f.message}`);
           });
         } else {
-          formattedContext.push('(No issues found)');
+          formattedContext.push('(No issues found in main branch changes)');
         }
         formattedContext.push('');
       }
 
       // Process local branch review
       if (data.localBranchReview) {
-        formattedContext.push('## CodeRabbit Review - Local Branch Changes:');
+        formattedContext.push('## Local Branch Changes (Your Branch):');
         const findings = extractFindings(data.localBranchReview);
         if (findings.length > 0) {
           findings.forEach((f, i) => {
             formattedContext.push(`${i+1}. ${f.file}:${f.line} - ${f.message}`);
           });
         } else {
-          formattedContext.push('(No issues found)');
+          formattedContext.push('(No issues found in local branch changes)');
         }
         formattedContext.push('');
       }
 
+      // Add summary for LLM context
+      const totalFindings = (data.mainBranchReview ? extractFindings(data.mainBranchReview).length : 0) + 
+                           (data.localBranchReview ? extractFindings(data.localBranchReview).length : 0);
+      
+      if (totalFindings > 0) {
+        formattedContext.push('## CodeRabbit Summary:');
+        formattedContext.push(`- Total findings: ${totalFindings}`);
+        formattedContext.push('- Review these findings when resolving merge conflicts');
+        formattedContext.push('- Consider addressing any security, performance, or style issues');
+        formattedContext.push('');
+      }
+
+      // Add clear separator for appending with RAG context
+      formattedContext.push('=== END CODERABBIT CONTEXT ===');
+      formattedContext.push('');
+
       const formatted = formattedContext.join('\n');
-      console.log(`   Found ${formattedContext.length - 2} total findings`);
+      console.log(`   Found ${totalFindings} total CodeRabbit findings`);
+      console.log(`   Context formatted for RAG chunk appending`);
 
       return formatted;
     } else {
@@ -181,6 +222,23 @@ function buildDescriptionPrompt({ filePath, conflictedCode, ragContext, codeRabb
     );
   }
 
+  // Add combined context section (Step 3: Append RAG chunks to CodeRabbit semantic context)
+  if (codeRabbitContext && ragContext) {
+    userParts.push(
+      '# Combined Context (CodeRabbit + RAG)',
+      '(This combines automated code review findings with similar code patterns)',
+      '',
+      codeRabbitContext,
+      '',
+      '--- RAG Context ---',
+      '',
+      ragContext,
+      '',
+      '--- End Combined Context ---',
+      ''
+    );
+  }
+
   userParts.push(
     '# File path',
     filePath,
@@ -192,6 +250,7 @@ function buildDescriptionPrompt({ filePath, conflictedCode, ragContext, codeRabb
     '- Suggest a safe merge strategy at a high level (keep ours, keep theirs, or combine – and why).',
     ragContext ? '- Use the RAG context to understand what each branch was trying to achieve.' : '',
     codeRabbitContext ? '- Consider the CodeRabbit findings when assessing code quality and potential issues.' : '',
+    (codeRabbitContext && ragContext) ? '- Use the combined context to make informed decisions about code quality and patterns.' : '',
     '',
     '# Conflicted file with markers',
     '```',
@@ -239,6 +298,23 @@ function buildResolutionPrompt({ filePath, conflictedCode, ragContext, codeRabbi
       ragContext,
       '',
       '---',
+      ''
+    );
+  }
+
+  // Add combined context section (Step 3: Append RAG chunks to CodeRabbit semantic context)
+  if (codeRabbitContext && ragContext) {
+    userParts.push(
+      '# Combined Context (CodeRabbit + RAG)',
+      '(This combines automated code review findings with similar code patterns)',
+      '',
+      codeRabbitContext,
+      '',
+      '--- RAG Context ---',
+      '',
+      ragContext,
+      '',
+      '--- End Combined Context ---',
       ''
     );
   }
@@ -324,6 +400,45 @@ async function callClaude({ model, system, messages }) {
   // Load CodeRabbit findings if available
   const codeRabbitContext = loadCodeRabbitContext();
 
+  // Step 6: Verify Output - Check that both contexts are loaded and will be passed to LLM
+  console.log('\n🔍 Step 6: Verifying Output...');
+  console.log('==========================================');
+  
+  if (ragContext) {
+    console.log('✅ RAG Context: Loaded successfully');
+    const ragLines = ragContext.split('\n').length;
+    console.log(`   Size: ${ragLines} lines`);
+    if (ragContext.includes('=== RAG CODE CHUNKS CONTEXT ===')) {
+      console.log('✅ RAG Context: Properly formatted with headers');
+    } else {
+      console.log('⚠️  RAG Context: Missing expected headers');
+    }
+  } else {
+    console.log('⚠️  RAG Context: Not loaded');
+  }
+  
+  if (codeRabbitContext) {
+    console.log('✅ CodeRabbit Context: Loaded successfully');
+    const crLines = codeRabbitContext.split('\n').length;
+    console.log(`   Size: ${crLines} lines`);
+    if (codeRabbitContext.includes('=== CODERABBIT SEMANTIC CONTEXT ===')) {
+      console.log('✅ CodeRabbit Context: Properly formatted with headers');
+    } else {
+      console.log('⚠️  CodeRabbit Context: Missing expected headers');
+    }
+  } else {
+    console.log('⚠️  CodeRabbit Context: Not loaded');
+  }
+  
+  if (ragContext && codeRabbitContext) {
+    console.log('✅ Combined Context: Both contexts available for appending');
+  } else {
+    console.log('⚠️  Combined Context: Missing one or both contexts');
+  }
+  
+  console.log('==========================================');
+  console.log('');
+
   // Step 1: Describe the conflict
   const describePrompt = buildDescriptionPrompt({
     filePath: targetFile,
@@ -331,6 +446,32 @@ async function callClaude({ model, system, messages }) {
     ragContext,
     codeRabbitContext
   });
+  
+  // Step 6: Verify that prompts contain expected content
+  console.log('🔍 Verifying Description Prompt...');
+  const descriptionPromptText = describePrompt.messages[0].content;
+  
+  if (descriptionPromptText.includes('Combined Context (CodeRabbit + RAG)')) {
+    console.log('✅ Description Prompt: Contains Combined Context section');
+  } else {
+    console.log('⚠️  Description Prompt: Missing Combined Context section');
+  }
+  
+  if (descriptionPromptText.includes('CodeRabbit')) {
+    console.log('✅ Description Prompt: Contains CodeRabbit context');
+  } else {
+    console.log('⚠️  Description Prompt: Missing CodeRabbit context');
+  }
+  
+  if (descriptionPromptText.includes('RAG')) {
+    console.log('✅ Description Prompt: Contains RAG context');
+  } else {
+    console.log('⚠️  Description Prompt: Missing RAG context');
+  }
+  
+  console.log(`   Total prompt size: ${descriptionPromptText.length} characters`);
+  console.log('');
+  
   const description = await callClaude({ model: MODEL, system: describePrompt.system, messages: describePrompt.messages });
 
   console.log('\nClaude Analysis:\n');
@@ -343,15 +484,50 @@ async function callClaude({ model, system, messages }) {
     ragContext,
     codeRabbitContext
   });
+  
+  // Step 6: Verify Resolution Prompt
+  console.log('\n🔍 Verifying Resolution Prompt...');
+  const resolutionPromptText = resolvePrompt.messages[0].content;
+  
+  if (resolutionPromptText.includes('Combined Context (CodeRabbit + RAG)')) {
+    console.log('✅ Resolution Prompt: Contains Combined Context section');
+  } else {
+    console.log('⚠️  Resolution Prompt: Missing Combined Context section');
+  }
+  
+  if (resolutionPromptText.includes('CodeRabbit')) {
+    console.log('✅ Resolution Prompt: Contains CodeRabbit context');
+  } else {
+    console.log('⚠️  Resolution Prompt: Missing CodeRabbit context');
+  }
+  
+  if (resolutionPromptText.includes('RAG')) {
+    console.log('✅ Resolution Prompt: Contains RAG context');
+  } else {
+    console.log('⚠️  Resolution Prompt: Missing RAG context');
+  }
+  
+  console.log(`   Total prompt size: ${resolutionPromptText.length} characters`);
+  console.log('');
+  
   const resolved = await callClaude({ model: MODEL, system: resolvePrompt.system, messages: resolvePrompt.messages });
 
+  // Clean up the resolved code - remove markdown code fences if present
+  let cleanedCode = String(resolved).trim();
+  
+  // Remove markdown code fences (```python, ```javascript, etc.)
+  cleanedCode = cleanedCode.replace(/^```[\w]*\n?/gm, '');  // Remove opening fence
+  cleanedCode = cleanedCode.replace(/\n?```\s*$/gm, '');    // Remove closing fence
+  cleanedCode = cleanedCode.trim();
+  
   // Save merged file output as a separate copy; do NOT modify original
 const OUTPUT_ROOT = process.env.MERGE_OUTPUT_ROOT || '/tmp/merged_suggestions';
 const outPath = path.join(OUTPUT_ROOT, path.relative(repoRoot, absFile));
 fs.mkdirSync(path.dirname(outPath), { recursive: true });
-const resolvedCode = String(resolved).trim() + '\n';
+const resolvedCode = cleanedCode + '\n';
 fs.writeFileSync(outPath, resolvedCode, 'utf-8');
 console.log(`\n✅ Wrote merged suggestion to: ${outPath}\n`);
 // Print the merged file contents to STDOUT
 process.stdout.write(resolvedCode);
 })();
+

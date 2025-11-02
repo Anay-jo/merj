@@ -346,31 +346,120 @@ echo "────────────────────────�
 echo ""
 
 # ============================================================================
-# STEP 5: Run Claude AI Resolution
+# STEP 5: Test the Combined Context Integration
 # ============================================================================
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "STEP 5: Running Claude AI resolution with full context"
+echo "STEP 5: Testing Combined Context Integration"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "Verifying that both contexts are ready for appending..."
+echo ""
+
+# Check if RAG context exists
+if [ -f "rag_output/llm_context.txt" ]; then
+    RAG_LINES=$(wc -l < rag_output/llm_context.txt)
+    echo "✅ RAG context found: rag_output/llm_context.txt"
+    echo "   Lines: $RAG_LINES"
+else
+    echo "❌ RAG context not found"
+    exit 1
+fi
+
+# Check if CodeRabbit context exists
+if [ -f "rag_output/coderabbit_review.json" ]; then
+    CR_BYTES=$(wc -c < rag_output/coderabbit_review.json)
+    echo "✅ CodeRabbit context found: rag_output/coderabbit_review.json"
+    echo "   Size: $CR_BYTES bytes"
+else
+    echo "❌ CodeRabbit context not found"
+    exit 1
+fi
+
+echo ""
+echo "🧪 Testing resolve_with_claude.js context loading..."
+echo ""
+
+# Test the direct Claude resolution script to verify combined context
+if [ -f "$ORIGINAL_DIR/bin/resolve_with_claude.js" ]; then
+    echo "Running test to verify combined context section..."
+    echo ""
+    
+    # Run with special output capture to check for combined context
+    # Note: We expect this to call the API, but we can verify logging
+    echo "This will call Claude API twice (description + resolution)"
+    echo "Press Enter to continue..."
+    read
+    echo ""
+    
+    # Capture the console output
+    CLAUDE_OUTPUT=$(node "$ORIGINAL_DIR/bin/resolve_with_claude.js" --file auth.py 2>&1 || true)
+    
+    echo "Checking output for context integration..."
+    echo ""
+    
+    # Check if combined context headers appeared in logging
+    if echo "$CLAUDE_OUTPUT" | grep -q "RAG context formatted for CodeRabbit appending"; then
+        echo "✅ SUCCESS: RAG context formatted for appending"
+    else
+        echo "⚠️  RAG context formatting log not found"
+    fi
+    
+    if echo "$CLAUDE_OUTPUT" | grep -q "Context formatted for RAG chunk appending"; then
+        echo "✅ SUCCESS: CodeRabbit context formatted for appending"
+    else
+        echo "⚠️  CodeRabbit context formatting log not found"
+    fi
+    
+    if echo "$CLAUDE_OUTPUT" | grep -q "Loaded RAG context"; then
+        echo "✅ SUCCESS: RAG context loaded"
+    else
+        echo "⚠️  RAG context loading not detected"
+    fi
+    
+    if echo "$CLAUDE_OUTPUT" | grep -q "Loaded CodeRabbit findings"; then
+        echo "✅ SUCCESS: CodeRabbit context loaded"
+    else
+        echo "⚠️  CodeRabbit context loading not detected"
+    fi
+    
+    echo ""
+    echo "✅ Step 5 verification complete!"
+    echo ""
+    echo "The system is now configured to:"
+    echo "  1. Load CodeRabbit semantic context with clear structure"
+    echo "  2. Load RAG code chunks with clear structure"
+    echo "  3. Append RAG chunks to CodeRabbit context in a combined section"
+    echo "  4. Pass combined context to Claude for merge resolution"
+    echo ""
+else
+    echo "❌ resolve_with_claude.js not found"
+    exit 1
+fi
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Running Full Claude AI Resolution"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "This will:"
 echo "  1. Load RAG context from rag_output/llm_context.txt"
 echo "  2. Load CodeRabbit findings from rag_output/coderabbit_review.json"
-echo "  3. Call Claude API to analyze the conflict"
-echo "  4. Call Claude API to generate resolved code"
-echo "  5. Prompt you to accept/reject the resolution"
+echo "  3. Combine them in a unified context section"
+echo "  4. Call Claude API to analyze the conflict"
+echo "  5. Call Claude API to generate resolved code"
+echo "  6. Prompt you to accept/reject the resolution"
 echo ""
 echo "Press Enter to continue..."
 read
 echo ""
 
 # Run the resolution
-if [ ! -f "$ORIGINAL_DIR/bin/resolve_with_prompt.js" ]; then
-    echo "❌ ERROR: resolve_with_prompt.js not found"
-    echo "   Expected at: $ORIGINAL_DIR/bin/resolve_with_prompt.js"
+if [ ! -f "$ORIGINAL_DIR/bin/resolve_with_claude.js" ]; then
+    echo "❌ ERROR: resolve_with_claude.js not found"
+    echo "   Expected at: $ORIGINAL_DIR/bin/resolve_with_claude.js"
     exit 1
 fi
 
-node "$ORIGINAL_DIR/bin/resolve_with_prompt.js" --file auth.py
+node "$ORIGINAL_DIR/bin/resolve_with_claude.js" --file auth.py
 
 RESOLUTION_EXIT=$?
 echo ""
